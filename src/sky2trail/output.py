@@ -168,7 +168,8 @@ def write_completed_cloud(path: str | Path, pc: CompletedCloud, crs_wkt: str | N
     header.add_extra_dim(laspy.ExtraBytesParams(name="source", type=np.uint8,
                                                 description="0 measured, 1 generated"))
     header.add_extra_dim(laspy.ExtraBytesParams(name="component", type=np.uint8,
-                                                description="0 unk 1 ground 2 stem 3 underst 4 crown"))
+                                                # LAS limits descriptions to 32 bytes.
+                                                description="0unk 1grnd 2stem 3under 4crown"))
     header.scales = np.array([0.01, 0.01, 0.01])
     header.offsets = np.array([float(pc.x.min()), float(pc.y.min()), float(pc.z.min())]) if len(pc) else np.zeros(3)
     if crs_wkt:

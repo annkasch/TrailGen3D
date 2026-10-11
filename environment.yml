@@ -1,0 +1,9 @@
+# conda env create -f environment.yml && conda activate trailgen3d
+name: trailgen3d
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -e .[geo,train,dev]
