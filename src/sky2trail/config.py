@@ -63,6 +63,22 @@ class PatchesCfg:
 
 
 @dataclass
+class Stage1Cfg:
+    """Stage 1 (learned stem map). Stored in each checkpoint so prediction matches training."""
+
+    resolution: float = 0.25          # input/output pixel size, meters
+    # Height bands (m above ground) for the vertical profile of non-ground returns;
+    # the last band is open-ended.
+    band_edges: list = field(default_factory=lambda: [0.0, 0.3, 2.0, 5.0, 10.0, 20.0])
+    height_scale: float = 30.0        # heights are divided by this before the network
+    density_radius: float = 2.0       # neighbourhood for the local pulse-density channel
+    small_dbh: float = 0.10           # stems below this go to the 'small stem' heatmap
+    heatmap_sigma: float = 0.5        # width of the target blob per stem, meters
+    peak_threshold: float = 0.3       # minimum heatmap value of a predicted stem
+    peak_radius: float = 1.0          # two predicted stems are at least this far apart
+
+
+@dataclass
 class Sky2TrailConfig:
     grid: GridCfg = field(default_factory=GridCfg)
     ground: GroundCfg = field(default_factory=GroundCfg)
@@ -70,6 +86,7 @@ class Sky2TrailConfig:
     stems_v0: StemsV0Cfg = field(default_factory=StemsV0Cfg)
     vegetation: VegetationCfg = field(default_factory=VegetationCfg)
     patches: PatchesCfg = field(default_factory=PatchesCfg)
+    stage1: Stage1Cfg = field(default_factory=Stage1Cfg)
 
     def to_dict(self) -> dict:
         return asdict(self)

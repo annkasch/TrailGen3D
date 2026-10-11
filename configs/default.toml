@@ -45,6 +45,17 @@ smoothing = 1.0             # neighbourhood radius for the share, meters
 core_size = 10.0            # predicted area; cores tile a scene edge to edge
 margin = 6.0                # context on every side -> 22 m input window
 
+[sky2trail.stage1]
+# Learned stem map. Saved inside each checkpoint; prediction uses the checkpoint's copy.
+resolution = 0.25           # pixel size of the input image and output maps
+band_edges = [0.0, 0.3, 2.0, 5.0, 10.0, 20.0]   # height bands of the vertical profile
+height_scale = 30.0         # heights divided by this before entering the network
+density_radius = 2.0        # neighbourhood of the local pulse-density channel
+small_dbh = 0.10            # stems thinner than this go to the 'small stem' heatmap
+heatmap_sigma = 0.5         # width of the target blob around each stem
+peak_threshold = 0.3        # minimum heatmap value for a predicted stem
+peak_radius = 1.0           # predicted stems are at least this far apart
+
 # ---------------------------------------------------------------------------
 # TrailGen3D: ground-level data -> navigation world
 # ---------------------------------------------------------------------------

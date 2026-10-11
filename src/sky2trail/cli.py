@@ -1,4 +1,4 @@
-"""`sky2trail inspect | run | synth`: aerial lidar in, ground-level data out."""
+"""`sky2trail inspect | run | synth | stage1`: aerial lidar in, ground-level data out."""
 
 from __future__ import annotations
 
@@ -100,6 +100,9 @@ def main(argv=None) -> int:
     ps.add_argument("--config", default=None)
     ps.add_argument("--no-preview", action="store_true")
     ps.set_defaults(func=_cmd_synth)
+
+    from .stage1.cli import add_parser as add_stage1
+    add_stage1(sub)
 
     args = p.parse_args(argv)
     return args.func(args)

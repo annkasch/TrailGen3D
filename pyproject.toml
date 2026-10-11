@@ -22,6 +22,8 @@ geo = [
     "pyproj>=3.5",
     "rasterio>=1.3",
 ]
+# Training and running the learned Sky2Trail models.
+train = ["torch>=2.1"]
 dev = ["pytest>=7"]
 
 [project.scripts]

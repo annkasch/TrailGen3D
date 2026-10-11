@@ -10,6 +10,8 @@ each crown are guessed:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from .config import Sky2TrailConfig
@@ -18,7 +20,7 @@ from .output import (COMPONENT_CROWN, COMPONENT_GROUND, COMPONENT_STEM, COMPONEN
                      SOURCE_GENERATED, SOURCE_MEASURED, Canopy, CompletedCloud, GroundSurface,
                      Sky2TrailOutput, Stem)
 from .quality import density_report
-from .terrain import build_terrain
+from .terrain import Terrain, build_terrain
 from .trees import Crown, canopy_height_model, extract_crowns
 from .vegetation import low_vegetation_fraction
 
@@ -63,38 +65,55 @@ def stem_points(stems: list[Stem], ground: GroundSurface, crown_base_fraction: f
     return np.concatenate(xs), np.concatenate(ys), np.concatenate(zs)
 
 
-def run_v0(pc: PointCloud, cfg: Sky2TrailConfig) -> Sky2TrailOutput:
+@dataclass
+class Measured:
+    """What the aerial lidar measures directly; shared by v0 and trained methods."""
+
+    terrain: Terrain
+    hag: np.ndarray          # height above ground of every input point
+    ground: GroundSurface
+    canopy: Canopy
+
+
+def measure(pc: PointCloud, cfg: Sky2TrailConfig) -> Measured:
     terrain = build_terrain(pc, cfg.grid.dem_resolution, cfg.ground)
     hag = terrain.height_above_ground(pc.x, pc.y, pc.z)
     ground = GroundSurface(terrain.grid, terrain.dem, np.clip(terrain.ground_support(), 0, 1))
-
     chm_grid = terrain.grid.resample_like(cfg.grid.chm_resolution)
     chm = canopy_height_model(chm_grid, pc.x, pc.y, hag)
     crowns, _ = extract_crowns(chm_grid, chm, pc.x, pc.y, hag, cfg.trees)
     low_veg = low_vegetation_fraction(chm_grid, pc.x, pc.y, hag, cfg.vegetation)
-    canopy = Canopy(chm_grid, chm, low_veg, crowns)
+    return Measured(terrain, hag, ground, Canopy(chm_grid, chm, low_veg, crowns))
 
-    stems = guess_stems(crowns, cfg)
 
-    # Measured points, labelled by height above ground.
-    comp = np.where(hag < cfg.trees.min_crown_height, COMPONENT_UNDERSTORY, COMPONENT_CROWN).astype(np.uint8)
+def assemble(pc: PointCloud, cfg: Sky2TrailConfig, m: Measured, stems: list[Stem], method: str,
+             extra_summary: dict | None = None) -> Sky2TrailOutput:
+    """Sky2Trail output from measured layers plus a stem list (guessed or predicted)."""
+    comp = np.where(m.hag < cfg.trees.min_crown_height, COMPONENT_UNDERSTORY, COMPONENT_CROWN).astype(np.uint8)
     comp[pc.classification == cfg.ground.classification] = COMPONENT_GROUND
-    sx, sy, sz = stem_points(stems, ground, cfg.stems_v0.crown_base_fraction, cfg.stems_v0.point_spacing)
+    sx, sy, sz = stem_points(stems, m.ground, cfg.stems_v0.crown_base_fraction, cfg.stems_v0.point_spacing)
     points = CompletedCloud(
         x=np.concatenate([pc.x, sx]), y=np.concatenate([pc.y, sy]), z=np.concatenate([pc.z, sz]),
         source=np.concatenate([np.full(len(pc), SOURCE_MEASURED, np.uint8), np.full(len(sx), SOURCE_GENERATED, np.uint8)]),
         component=np.concatenate([comp, np.full(len(sx), COMPONENT_STEM, np.uint8)]),
     )
-
+    crowns = m.canopy.crowns
     summary = {
         "source": pc.source,
         "tile": density_report(pc),
-        "ground_filter": "lowest-point fallback" if terrain.used_fallback else "delivered ground class",
-        "ground_measured_fraction": round(float((terrain.ground_count > 0).mean()), 3),
+        "ground_filter": "lowest-point fallback" if m.terrain.used_fallback else "delivered ground class",
+        "ground_measured_fraction": round(float((m.terrain.ground_count > 0).mean()), 3),
         "crowns": len(crowns),
         "stems": len(stems),
         "lidar_points_per_crown_median": float(np.median([c.n_points for c in crowns])) if crowns else None,
-        "stem_rule": "one stem per crown under the treetop; dbh from placeholder height rule",
-        "config": cfg.to_dict(),
     }
-    return Sky2TrailOutput(METHOD, ground, stems, points, canopy, summary)
+    summary.update(extra_summary or {})
+    summary["config"] = cfg.to_dict()
+    return Sky2TrailOutput(method, m.ground, stems, points, m.canopy, summary)
+
+
+def run_v0(pc: PointCloud, cfg: Sky2TrailConfig) -> Sky2TrailOutput:
+    m = measure(pc, cfg)
+    stems = guess_stems(m.canopy.crowns, cfg)
+    return assemble(pc, cfg, m, stems, METHOD, {
+        "stem_rule": "one stem per crown under the treetop; dbh from placeholder height rule"})

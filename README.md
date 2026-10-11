@@ -40,6 +40,39 @@ On a synthetic forest, v0 finds 92–97 % of stems within 1 m at QL2 and QL1 den
 no false stems. The synthetic forest is deliberately simple; real-forest numbers come from
 field ground truth.
 
+## Stage 1: learned stem map
+
+`sky2trail.stage1` replaces v0's guessed stems with a trained network; ground and canopy stay
+as measured. A small U-Net reads each 22 m input window as a 13-channel top-down image
+(0.25 m pixels): returns per height band, canopy height, lowest return, share of later
+returns, ground hits, pulse density. It predicts per pixel:
+
+- a stem heatmap (two channels: stems >= 10 cm DBH and thinner ones),
+- the stem's position inside the pixel,
+- DBH and tree height.
+
+Peaks in the heatmap become the stem list. Each window keeps only the stems in its 10 m core.
+
+The loss counts only where stems are labelled. That excludes area outside a field plot, and
+the small-stem channel on sources like NEON that map only stems >= 10 cm.
+
+Until real plots are prepared, it trains on synthetic forests made harder on purpose:
+small trees under big crowns, leaning trees, and occasional trunk hits. On these, v0
+finds only ~40 % of stems within 1 m.
+
+```bash
+pip install torch          # CUDA build on the GPU machine: see pytorch.org for the right command
+pytest tests/sky2trail/test_stage1_torch.py -v      # ~1 min smoke test of model, training, checkpoints
+
+sky2trail stage1 data-synth --out data/stage1_synth                 # 40 train + 8 val scenes, ~1 min
+sky2trail stage1 train --data data/stage1_synth --out runs/s1_synth # GPU picked automatically
+sky2trail stage1 eval-synth --model runs/s1_synth/best.pt --out runs/s1_synth/eval   # vs v0
+sky2trail stage1 run data/pilot.laz --model runs/s1_synth/best.pt --out outputs/pilot_s1
+```
+
+`train` writes `last.pt` every epoch (`--resume` continues from it), `best.pt` on the best
+validation F1, and `metrics.jsonl` with one line per epoch.
+
 ## Quick start
 
 ```bash
@@ -73,6 +106,8 @@ src/sky2trail/
   output.py                 the output format (stems, ground surface, completed cloud)
   baseline.py               v0 rules
   patches.py                patches for trained models: 10 m core, 22 m input window
+  stage1/                   learned stem map: features, targets, augment, decode, dataset
+                            (numpy); model, train, predict (PyTorch); cli
   terrain.py trees.py vegetation.py   measured ground, canopy, crowns, low vegetation
   io.py grid.py quality.py  lidar reading, grids, tile quality report
   synthetic.py evaluate.py  synthetic forests with known stems, stem-matching metrics

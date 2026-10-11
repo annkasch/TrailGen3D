@@ -7,6 +7,8 @@ __pycache__/
 # Data and outputs stay out of git: they are large and re-downloadable.
 data/
 outputs/
+runs/
+*.pt
 *.laz
 *.las
 *.tif
