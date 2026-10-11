@@ -4,7 +4,8 @@
 
 Validation decodes every validation window, keeps stems in its core, and matches them to the
 known stems within 1 m (and 0.5 m), at several heatmap thresholds; the best threshold is
-stored in the checkpoint and used for prediction.
+stored in the checkpoint and used for prediction. After the last epoch, the last-layer
+Laplace approximation (laplace.py) is fitted on best.pt and stored in it.
 """
 
 from __future__ import annotations
@@ -218,4 +219,18 @@ def train(data_dir: str, out_dir: str, epochs: int = 60, batch_size: int = 32, l
               f"  val: recall {val['recall_1m']:.2f} precision {val['precision_1m']:.2f}"
               f" F1 {val['f1_1m']:.3f} (1 m, thr {val['threshold']})  dbh err {val['dbh_mae_m']}"
               + ("  *best" if improved else ""))
+    if (out / "best.pt").exists():
+        add_laplace(out / "best.pt", train_s, val_s, dev, batch_size)
     return {"best_f1_1m": best_f1, "out": str(out)}
+
+
+def add_laplace(checkpoint: Path, train_s: StemSamples, val_s: StemSamples, dev, batch_size: int) -> None:
+    """Fit the last-layer Laplace approximation on the checkpoint's weights and store it there."""
+    from .laplace import fit_laplace
+
+    ck = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    a = ck["model_args"]
+    model = StemUNet(a["in_channels"], base=a["base"], depth=a["depth"]).to(dev)
+    model.load_state_dict(ck["model"])
+    ck["laplace"] = fit_laplace(model, train_s, val_s, dev, batch_size)
+    torch.save(ck, checkpoint)

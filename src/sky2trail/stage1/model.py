@@ -5,6 +5,8 @@ Input (B, C, H, W) image of a window. Outputs at the same resolution:
   offset (B, 2, H, W) stem position minus pixel centre, in pixels
   size   (B, 2, H, W) log(dbh in m), height / height_scale
 With 4 down-sampling steps each output pixel sees ~20 m around it, about one large crown.
+forward(x, features=True) also returns the per-pixel inputs of the last offset and size layers
+(`offset_features`, `size_features`), used for uncertainty (see laplace.py).
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ class StemUNet(nn.Module):
         # Start with a low stem probability everywhere (CenterNet trick, p = 0.1).
         nn.init.constant_(self.heat[-1].bias, -math.log((1 - 0.1) / 0.1))
 
-    def forward(self, x: torch.Tensor) -> dict:
+    def forward(self, x: torch.Tensor, features: bool = False) -> dict:
         H, W = x.shape[-2:]
         m = 2 ** self.depth
         ph, pw = (-H) % m, (-W) % m
@@ -56,7 +58,12 @@ class StemUNet(nn.Module):
         x = skips.pop()
         for up, dec in zip(self.up, self.dec):
             x = dec(torch.cat([up(x), skips.pop()], dim=1))
-        out = {"heat": self.heat(x), "offset": self.offset(x), "size": self.size(x)}
+        # Regression heads in two steps, so the input of their last (linear) layer is available.
+        hidden = {"offset": self.offset[:-1](x), "size": self.size[:-1](x)}
+        out = {"heat": self.heat(x), "offset": self.offset[-1](hidden["offset"]),
+               "size": self.size[-1](hidden["size"])}
+        if features:
+            out.update({f"{k}_features": v for k, v in hidden.items()})
         return {k: v[..., :H, :W] for k, v in out.items()}
 
 

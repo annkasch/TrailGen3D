@@ -18,6 +18,7 @@ from ..patches import tile_patches
 from .dataset import window_samples
 from .decode import decode, to_stems
 from .features import window_grid
+from .laplace import std_maps
 from .model import StemUNet
 from .train import _autocast, pick_device
 
@@ -37,19 +38,25 @@ class Stage1Model:
         self.net.to(self.device).eval()
         self.checkpoint = str(checkpoint)
         self.val = ck.get("val")
+        self.laplace = ck.get("laplace")  # None for checkpoints trained before it existed
 
     @torch.no_grad()
-    def maps(self, images: np.ndarray, batch: int = 32) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        heats, offs, sizes = [], [], []
+    def maps(self, images: np.ndarray, batch: int = 32) -> dict:
+        """heat (probabilities), offset, size; with Laplace also offset_std and size_std."""
+        res = {"heat": [], "offset": [], "size": [], "offset_std": [], "size_std": []}
         amp = self.device.type == "cuda"
         for i in range(0, len(images), batch):
             x = torch.from_numpy(images[i:i + batch].astype(np.float32)).to(self.device)
             with _autocast(self.device, amp):
-                out = self.net(x)
-            heats.append(torch.sigmoid(out["heat"].float()).cpu().numpy())
-            offs.append(out["offset"].float().cpu().numpy())
-            sizes.append(out["size"].float().cpu().numpy())
-        return np.concatenate(heats), np.concatenate(offs), np.concatenate(sizes)
+                out = self.net(x, features=self.laplace is not None)
+            res["heat"].append(torch.sigmoid(out["heat"].float()).cpu().numpy())
+            res["offset"].append(out["offset"].float().cpu().numpy())
+            res["size"].append(out["size"].float().cpu().numpy())
+            if self.laplace is not None:
+                std = std_maps(out, self.laplace)
+                res["offset_std"].append(std["offset"].cpu().numpy())
+                res["size_std"].append(std["size"].cpu().numpy())
+        return {k: np.concatenate(v) for k, v in res.items() if v}
 
 
 def predict_stems(pc: PointCloud, hag: np.ndarray, model: Stage1Model, cfg: Sky2TrailConfig) -> dict:
@@ -58,12 +65,13 @@ def predict_stems(pc: PointCloud, hag: np.ndarray, model: Stage1Model, cfg: Sky2
     cfg.stage1 = model.cfg  # rasterize exactly as during training
     patches = tile_patches(pc.bounds, cfg.patches.core_size, cfg.patches.margin)
     samples = window_samples(pc, hag, patches, None, None, False, cfg)
-    heat, off, size = model.maps(np.stack([s["image"] for s in samples]))
+    m = model.maps(np.stack([s["image"] for s in samples]))
     parts = []
     for k, (s, p) in enumerate(zip(samples, patches)):
         grid = window_grid(s["bounds"], model.cfg.resolution)
-        parts.append(decode(heat[k], off[k], size[k], grid, model.cfg, core_bounds=p.core_bounds,
-                            threshold=model.threshold))
+        std = (m["offset_std"][k], m["size_std"][k]) if "offset_std" in m else None
+        parts.append(decode(m["heat"][k], m["offset"][k], m["size"][k], grid, model.cfg,
+                            core_bounds=p.core_bounds, threshold=model.threshold, std=std))
     return {key: np.concatenate([d[key] for d in parts]) for key in parts[0]}
 
 
@@ -74,6 +82,7 @@ def run_stage1(pc: PointCloud, cfg: Sky2TrailConfig, model: Stage1Model) -> Sky2
     return assemble(pc, cfg, m, stems, METHOD, {
         "stem_rule": "learned stem map (stage 1 U-Net)",
         "checkpoint": model.checkpoint, "threshold": model.threshold,
+        "uncertainty": "last-layer Laplace" if model.laplace is not None else None,
         "small_stems": int(d["small"].sum()),
     })
 

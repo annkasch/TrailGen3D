@@ -3,7 +3,8 @@
 On disk (`Sky2TrailOutput.save`):
   points.npz / points.laz   completed point cloud; per point `source` (measured / generated)
                             and `component` (ground / stem / understory / crown)
-  stems.csv                 one row per stem: position, diameter, height, confidence
+  stems.csv                 one row per stem: position, diameter, height, confidence, and
+                            their standard deviations where the method gives them
   crowns.csv                measured crowns the stems belong to
   ground/elevation, ground/confidence   ground surface and how much of it was measured
   canopy/chm, canopy/low_vegetation     measured canopy layers
@@ -46,11 +47,16 @@ class Stem:
     height: float           # tree height, meters
     crown_id: int           # measured crown it belongs to (0 = none, e.g. hidden understorey tree)
     confidence: float       # 0..1; method-specific, see summary["method"]
+    # One standard deviation, meters (xy_std per axis); NaN if the method gives none (v0).
+    xy_std: float = float("nan")
+    dbh_std: float = float("nan")
+    height_std: float = float("nan")
 
     def as_row(self) -> dict:
         return {"id": self.id, "x": round(self.x, 2), "y": round(self.y, 2), "dbh": round(self.dbh, 3),
                 "height": round(self.height, 2), "crown_id": self.crown_id,
-                "confidence": round(self.confidence, 3)}
+                "confidence": round(self.confidence, 3), "xy_std": round(self.xy_std, 3),
+                "dbh_std": round(self.dbh_std, 3), "height_std": round(self.height_std, 2)}
 
 
 @dataclass
@@ -117,7 +123,8 @@ class Sky2TrailOutput:
             "chm": write_raster(out / "canopy/chm", self.canopy.chm, self.canopy.grid, crs_wkt),
             "low_vegetation": write_raster(out / "canopy/low_vegetation", self.canopy.low_vegetation, self.canopy.grid, crs_wkt),
             "stems": _write_csv(out / "stems.csv", [s.as_row() for s in self.stems],
-                                ["id", "x", "y", "dbh", "height", "crown_id", "confidence"]),
+                                ["id", "x", "y", "dbh", "height", "crown_id", "confidence",
+                                 "xy_std", "dbh_std", "height_std"]),
             "crowns": _write_csv(out / "crowns.csv", [_crown_row(c) for c in self.canopy.crowns],
                                  ["id", "x", "y", "height", "crown_diameter", "n_points"]),
         }
@@ -201,5 +208,8 @@ def load_completed_cloud(path: str | Path) -> CompletedCloud:
 
 def load_stems(path: str | Path) -> list[Stem]:
     with open(path, newline="") as fh:
+        nan = "nan"  # stems.csv written before the uncertainty columns existed
         return [Stem(int(r["id"]), float(r["x"]), float(r["y"]), float(r["dbh"]), float(r["height"]),
-                     int(r["crown_id"]), float(r["confidence"])) for r in csv.DictReader(fh)]
+                     int(r["crown_id"]), float(r["confidence"]), float(r.get("xy_std", nan)),
+                     float(r.get("dbh_std", nan)), float(r.get("height_std", nan)))
+                for r in csv.DictReader(fh)]
