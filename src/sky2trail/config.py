@@ -55,12 +55,21 @@ class VegetationCfg:
 
 
 @dataclass
+class PatchesCfg:
+    """Unit of work for trained models: predicted core plus a context margin."""
+
+    core_size: float = 10.0  # side of the square the model predicts, meters
+    margin: float = 6.0      # extra aerial context on every side (about one crown radius)
+
+
+@dataclass
 class Sky2TrailConfig:
     grid: GridCfg = field(default_factory=GridCfg)
     ground: GroundCfg = field(default_factory=GroundCfg)
     trees: TreesCfg = field(default_factory=TreesCfg)
     stems_v0: StemsV0Cfg = field(default_factory=StemsV0Cfg)
     vegetation: VegetationCfg = field(default_factory=VegetationCfg)
+    patches: PatchesCfg = field(default_factory=PatchesCfg)
 
     def to_dict(self) -> dict:
         return asdict(self)

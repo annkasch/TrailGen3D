@@ -72,6 +72,7 @@ scripts/fetch_3dep.py       download a 3DEP point cloud for a lon/lat box
 src/sky2trail/
   output.py                 the output format (stems, ground surface, completed cloud)
   baseline.py               v0 rules
+  patches.py                patches for trained models: 10 m core, 22 m input window
   terrain.py trees.py vegetation.py   measured ground, canopy, crowns, low vegetation
   io.py grid.py quality.py  lidar reading, grids, tile quality report
   synthetic.py evaluate.py  synthetic forests with known stems, stem-matching metrics

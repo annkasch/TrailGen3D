@@ -38,6 +38,13 @@ low_min = 0.3               # low-vegetation band, height above ground
 low_max = 2.0
 smoothing = 1.0             # neighbourhood radius for the share, meters
 
+[sky2trail.patches]
+# Trained models predict a square core and see a larger input window around it.
+# 10 m cores fit inside the 20 m USGS Sierra field plots; the margin holds the crowns
+# of trees near the core edge (Sierra conifer crowns are 8-15 m wide).
+core_size = 10.0            # predicted area; cores tile a scene edge to edge
+margin = 6.0                # context on every side -> 22 m input window
+
 # ---------------------------------------------------------------------------
 # TrailGen3D: ground-level data -> navigation world
 # ---------------------------------------------------------------------------
