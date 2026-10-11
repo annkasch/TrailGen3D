@@ -7,11 +7,12 @@ name = "trailgen3d"
 version = "0.1.0"
 description = "Navigation-ready 3D simulation worlds of natural terrain from public aerial lidar"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "matplotlib>=3.7",
+    "tomli>=2; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
