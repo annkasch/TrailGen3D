@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Data and outputs stay out of git: they are large and re-downloadable.
+data/
+outputs/
+*.laz
+*.las
+*.tif
+*.npz
