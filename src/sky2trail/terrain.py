@@ -12,6 +12,19 @@ from .grid import Grid, bin_stat
 from .io import PointCloud
 
 
+def slope_deg(grid: Grid, dem: np.ndarray) -> np.ndarray:
+    gy, gx = np.gradient(dem, grid.resolution)
+    return np.degrees(np.arctan(np.hypot(gx, gy)))
+
+
+def roughness(grid: Grid, dem: np.ndarray, window_m: float = 3.0) -> np.ndarray:
+    """Std. dev. of the DEM around its local mean surface, over a window."""
+    size = max(3, int(round(window_m / grid.resolution)) | 1)
+    smooth = ndimage.uniform_filter(dem, size=size, mode="nearest")
+    resid = dem - smooth
+    return np.sqrt(ndimage.uniform_filter(resid**2, size=size, mode="nearest"))
+
+
 @dataclass
 class Terrain:
     grid: Grid
@@ -23,15 +36,10 @@ class Terrain:
         return z - self.grid.sample(self.dem, x, y)
 
     def slope_deg(self) -> np.ndarray:
-        gy, gx = np.gradient(self.dem, self.grid.resolution)
-        return np.degrees(np.arctan(np.hypot(gx, gy)))
+        return slope_deg(self.grid, self.dem)
 
     def roughness(self, window_m: float = 3.0) -> np.ndarray:
-        """Std. dev. of the DEM around its local mean surface, over a window."""
-        size = max(3, int(round(window_m / self.grid.resolution)) | 1)
-        smooth = ndimage.uniform_filter(self.dem, size=size, mode="nearest")
-        resid = self.dem - smooth
-        return np.sqrt(ndimage.uniform_filter(resid**2, size=size, mode="nearest"))
+        return roughness(self.grid, self.dem, window_m)
 
     def ground_support(self, radius_m: float = 2.0) -> np.ndarray:
         """Share of nearby cells backed by real ground returns (1 = fully measured)."""

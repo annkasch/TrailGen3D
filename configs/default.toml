@@ -1,17 +1,20 @@
-# TrailGen3D default parameters.
-# Distances in meters, angles in degrees. Override any value with --config my.toml.
+# Default parameters. Distances in meters, angles in degrees.
+# Override any value with --config my.toml (same table layout, only the keys you change).
 
-[grid]
-dem_resolution = 1.0        # ground model; 0.5 for QL1 tiles, 1.0 for QL2
+# ---------------------------------------------------------------------------
+# Sky2Trail: aerial lidar -> ground-level data
+# ---------------------------------------------------------------------------
+
+[sky2trail.grid]
+dem_resolution = 1.0        # ground surface; 0.5 for QL1 tiles, 1.0 for QL2
 chm_resolution = 0.5        # canopy height model
-cost_resolution = 0.25      # traversability / Nav2 map
 
-[ground]
+[sky2trail.ground]
 classification = 2          # ASPRS ground class
 min_ground_fraction = 0.01  # below this, fall back to lowest-point ground filter
 max_ground_residual = 0.5   # 'ground' points this far above local ground are dropped
 
-[trees]
+[sky2trail.trees]
 min_tree_height = 3.0       # treetops lower than this are ignored
 min_crown_height = 2.0      # canopy cells lower than this are not crown
 # Search radius for treetops grows with tree height: r = base + slope * height.
@@ -22,24 +25,34 @@ max_crown_radius = 10.0
 # max(min_saddle_drop, min_saddle_fraction * height of the lower peak).
 min_saddle_drop = 1.5
 min_saddle_fraction = 0.15
-# Trunk diameter from height: dbh_cm = a * height_m ** b.
-# PLACEHOLDER coefficients - calibrate per forest type (e.g. against NEON plots).
-dbh_a = 1.5
+
+[sky2trail.stems_v0]
+# Rules of the v0 baseline. PLACEHOLDERS - fit to field data per forest type.
+dbh_a = 1.5                 # dbh_cm = dbh_a * height_m ** dbh_b
 dbh_b = 1.05
+crown_base_fraction = 0.4   # stems drawn up to this share of tree height
+point_spacing = 0.1         # spacing of generated stem points
 
-[vegetation]
-low_min = 0.3               # shrub / low-obstacle band, height above ground
+[sky2trail.vegetation]
+low_min = 0.3               # low-vegetation band, height above ground
 low_max = 2.0
-smoothing = 1.0             # neighbourhood radius for density, meters
+smoothing = 1.0             # neighbourhood radius for the share, meters
 
-[robot]
+# ---------------------------------------------------------------------------
+# TrailGen3D: ground-level data -> navigation world
+# ---------------------------------------------------------------------------
+
+[trailgen3d.grid]
+cost_resolution = 0.25      # traversability / Nav2 map
+
+[trailgen3d.robot]
 # Unitree Go2 defaults. Replace with values measured on your own robot.
 half_width = 0.16           # Go2 body is about 0.31 m wide
 safety_margin = 0.10        # extra clearance around hard obstacles
 max_slope = 30.0            # slopes steeper than this are blocked
-max_roughness = 0.15        # DEM roughness (m) treated as fully costly
+max_roughness = 0.15        # ground roughness (m) treated as fully costly
 
-[cost_weights]
+[trailgen3d.cost_weights]
 slope = 0.5
 roughness = 0.2
 shrub = 0.6

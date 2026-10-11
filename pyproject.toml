@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trailgen3d"
 version = "0.1.0"
-description = "Navigation-ready 3D simulation worlds of natural terrain from public aerial lidar"
+description = "Sky2Trail (aerial lidar to ground-level data) and TrailGen3D (navigation worlds)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -25,6 +25,7 @@ geo = [
 dev = ["pytest>=7"]
 
 [project.scripts]
+sky2trail = "sky2trail.cli:main"
 trailgen = "trailgen3d.cli:main"
 
 [tool.setuptools.packages.find]

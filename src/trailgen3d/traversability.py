@@ -1,4 +1,4 @@
-"""Combine terrain, trunks and vegetation into a navigation cost map for the robot."""
+"""Navigation cost map from a Sky2Trail output: ground surface, stems and low vegetation."""
 
 from __future__ import annotations
 
@@ -6,26 +6,26 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import Config
-from .grid import Grid, resample
-from .terrain import Terrain
-from .trees import Tree
+from sky2trail.grid import Grid, resample
+from sky2trail.output import Sky2TrailOutput, Stem
+
+from .config import WorldConfig
 
 
 @dataclass
 class CostMap:
     grid: Grid
     cost: np.ndarray        # 0 = free ... 1 = blocked
-    blocked: np.ndarray     # hard limits: trunks, too-steep slopes
+    blocked: np.ndarray     # hard limits: stems, too-steep slopes
     layers: dict            # individual cost terms, for inspection
-    confidence: np.ndarray  # 0..1, share of the ground model backed by real returns
+    confidence: np.ndarray  # 0..1, from the Sky2Trail ground confidence
 
 
-def rasterize_trunks(grid: Grid, trees: list[Tree], inflation: float) -> np.ndarray:
-    """Discs of radius dbh/2 + inflation around each trunk."""
+def rasterize_stems(grid: Grid, stems: list[Stem], inflation: float) -> np.ndarray:
+    """Discs of radius dbh/2 + inflation around each stem."""
     mask = np.zeros(grid.shape, dtype=bool)
     res = grid.resolution
-    for t in trees:
+    for t in stems:
         radius = t.dbh / 2.0 + inflation
         c0 = int(np.floor((t.x - radius - grid.xmin) / res))
         c1 = int(np.ceil((t.x + radius - grid.xmin) / res))
@@ -42,26 +42,26 @@ def rasterize_trunks(grid: Grid, trees: list[Tree], inflation: float) -> np.ndar
     return mask
 
 
-def build_cost_map(terrain: Terrain, trees: list[Tree], shrub_fraction: np.ndarray,
-                   shrub_grid: Grid, cfg: Config) -> CostMap:
-    grid = terrain.grid.resample_like(cfg.grid.cost_resolution)
+def build_cost_map(s2t: Sky2TrailOutput, cfg: WorldConfig) -> CostMap:
+    g = s2t.ground
+    grid = g.grid.resample_like(cfg.grid.cost_resolution)
     r, w = cfg.robot, cfg.cost_weights
 
-    slope = resample(terrain.grid, terrain.slope_deg(), grid)
-    rough = resample(terrain.grid, terrain.roughness(), grid)
-    shrub = resample(shrub_grid, np.nan_to_num(shrub_fraction, nan=0.0), grid)
-    support = resample(terrain.grid, terrain.ground_support(), grid)
+    slope = resample(g.grid, g.slope_deg(), grid)
+    rough = resample(g.grid, g.roughness(), grid)
+    shrub = resample(s2t.canopy.grid, np.nan_to_num(s2t.canopy.low_vegetation, nan=0.0), grid)
+    conf = resample(g.grid, g.confidence, grid)
 
     c_slope = np.clip(slope / r.max_slope, 0, 1)
     c_rough = np.clip(rough / r.max_roughness, 0, 1)
     c_shrub = np.clip(shrub, 0, 1)
 
-    trunks = rasterize_trunks(grid, trees, r.half_width + r.safety_margin)
+    stems = rasterize_stems(grid, s2t.stems, r.half_width + r.safety_margin)
     too_steep = slope > r.max_slope
-    blocked = trunks | too_steep
+    blocked = stems | too_steep
 
     # Independent penalties combined so that no single term exceeds 1.
     cost = 1.0 - (1 - w.slope * c_slope) * (1 - w.roughness * c_rough) * (1 - w.shrub * c_shrub)
     cost[blocked] = 1.0
-    layers = {"slope_deg": slope, "roughness": rough, "shrub": shrub, "trunks": trunks}
-    return CostMap(grid, cost, blocked, layers, np.clip(support, 0, 1))
+    layers = {"slope_deg": slope, "roughness": rough, "shrub": shrub, "stems": stems}
+    return CostMap(grid, cost, blocked, layers, np.clip(conf, 0, 1))

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,7 +69,7 @@ def _crs_scales(crs) -> tuple[float, float]:
 
 
 def read_points(path: str | Path, units: str = "auto") -> PointCloud:
-    """Read a LAS/LAZ file (needs laspy) or a TrailGen3D .npz, returning meters.
+    """Read a LAS/LAZ file (needs laspy) or a Sky2Trail .npz, returning meters.
 
     units: 'auto' reads the unit from the file's CRS; 'm', 'us-ft' or 'ft' force it.
     """
@@ -141,42 +140,3 @@ def write_raster(path: str | Path, raster: np.ndarray, grid: Grid, crs_wkt: str 
     ) as dst:
         dst.write(raster.astype(np.float32), 1)
     return tif
-
-
-def write_nav2_map(directory: str | Path, cost: np.ndarray, grid: Grid, name: str = "map") -> Path:
-    """Nav2 map_server map (PGM + YAML) in a local frame whose origin is the grid's SW corner.
-
-    Pixel value 0 = blocked, 254 = free, in between = graded cost (map mode 'scale').
-    """
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    c = np.nan_to_num(np.clip(cost, 0.0, 1.0), nan=1.0)
-    img = np.round((1.0 - c) * 254).astype(np.uint8)
-    pgm = directory / f"{name}.pgm"
-    with open(pgm, "wb") as fh:
-        fh.write(f"P5\n{grid.ncols} {grid.nrows}\n255\n".encode())
-        fh.write(img.tobytes())
-    yaml = directory / f"{name}.yaml"
-    yaml.write_text(
-        f"image: {name}.pgm\n"
-        f"mode: scale\n"
-        f"resolution: {grid.resolution}\n"
-        f"origin: [0.0, 0.0, 0.0]\n"
-        f"negate: 0\n"
-        f"occupied_thresh: 0.65\n"
-        f"free_thresh: 0.196\n"
-        f"# Local frame: x = easting - {grid.xmin}, y = northing - {grid.ymin}\n"
-    )
-    return yaml
-
-
-def write_trees_csv(path: str | Path, trees: list[dict]) -> Path:
-    path = Path(path)
-    if not trees:
-        path.write_text("id,x,y,height,crown_diameter,dbh\n")
-        return path
-    with open(path, "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(trees[0].keys()))
-        writer.writeheader()
-        writer.writerows(trees)
-    return path

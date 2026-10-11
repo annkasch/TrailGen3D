@@ -1,7 +1,7 @@
-"""Canopy height model, treetop detection, crown segmentation and baseline trunks.
+"""Measured canopy: canopy height model, treetop detection and crown segmentation.
 
-Baseline only: each crown gets one trunk directly under its treetop, with a diameter
-from a height-diameter rule. The learned tree model (Phase 6) replaces this.
+Everything here is derived from what the aerial lidar saw. Stems under the crowns are
+inferred elsewhere (`baseline` for the v0 rules, trained models later).
 """
 
 from __future__ import annotations
@@ -16,21 +16,13 @@ from .grid import Grid, bin_stat
 
 
 @dataclass
-class Tree:
+class Crown:
     id: int
-    x: float
+    x: float              # treetop position
     y: float
-    height: float
-    crown_diameter: float
-    dbh: float           # trunk diameter at breast height, meters
-    n_points: int        # lidar returns inside the crown
-
-    def as_row(self) -> dict:
-        return {
-            "id": self.id, "x": round(self.x, 2), "y": round(self.y, 2),
-            "height": round(self.height, 2), "crown_diameter": round(self.crown_diameter, 2),
-            "dbh": round(self.dbh, 3), "n_points": self.n_points,
-        }
+    height: float         # treetop height above ground
+    crown_diameter: float # diameter of a circle with the crown's area
+    n_points: int         # lidar returns inside the crown
 
 
 def _fill_empty(raster: np.ndarray, max_iter: int = 10) -> np.ndarray:
@@ -133,12 +125,8 @@ def segment_crowns(grid: Grid, chm: np.ndarray, tops, cfg: TreesCfg) -> np.ndarr
     return labels
 
 
-def dbh_from_height(height: np.ndarray | float, cfg: TreesCfg) -> np.ndarray | float:
-    """Placeholder height-diameter rule (meters). Calibrate a, b per forest type."""
-    return cfg.dbh_a * np.power(height, cfg.dbh_b) / 100.0
-
-
-def extract_trees(grid: Grid, chm: np.ndarray, x, y, hag, cfg: TreesCfg) -> tuple[list[Tree], np.ndarray]:
+def extract_crowns(grid: Grid, chm: np.ndarray, x, y, hag, cfg: TreesCfg) -> tuple[list[Crown], np.ndarray]:
+    """Crowns with treetop position, height, diameter and lidar point count; plus the label raster."""
     tops = detect_treetops(grid, chm, cfg)
     labels = segment_crowns(grid, chm, tops, cfg)
     cell_area = grid.resolution**2
@@ -151,10 +139,10 @@ def extract_trees(grid: Grid, chm: np.ndarray, x, y, hag, cfg: TreesCfg) -> tupl
     pt_label[hag < cfg.min_crown_height * 0.5] = 0
     counts = np.bincount(pt_label, minlength=len(tops) + 1)
 
-    trees = []
+    crowns = []
     for i, (r, c, h) in enumerate(tops, start=1):
         cx = grid.xmin + (c + 0.5) * grid.resolution
         cy = grid.ymax - (r + 0.5) * grid.resolution
         diam = 2.0 * np.sqrt(areas[i] / np.pi)
-        trees.append(Tree(i, cx, cy, h, float(diam), float(dbh_from_height(h, cfg)), int(counts[i])))
-    return trees, labels
+        crowns.append(Crown(i, cx, cy, h, float(diam), int(counts[i])))
+    return crowns, labels
