@@ -11,3 +11,6 @@ outputs/
 *.las
 *.tif
 *.npz
+
+# Planning documents (description, proposal, plans) stay out of the repository.
+docs/

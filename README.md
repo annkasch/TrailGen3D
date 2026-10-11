@@ -105,8 +105,3 @@ tests/                   end-to-end tests on synthetic data
 - Steps and drop-offs smaller than the DEM resolution (0.5–1 m) are not resolved.
 - Low-vegetation values under dense canopy are underestimated (the canopy hides it).
 - `scripts/fetch_3dep.py` has not yet been tested end to end.
-
-## Project documents
-
-Project description, proposal, build plan and detailed plans are kept as shared docs;
-see `docs/README.md`.
