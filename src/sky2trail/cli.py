@@ -1,4 +1,4 @@
-"""`sky2trail inspect | run | synth | stage1`: aerial lidar in, ground-level data out."""
+"""`sky2trail inspect | run | synth | stage1 | neon`: aerial lidar in, ground-level data out."""
 
 from __future__ import annotations
 
@@ -74,6 +74,26 @@ def _cmd_synth(args) -> int:
     return 0
 
 
+def _cmd_neon_fetch(args) -> int:
+    from .neon import NeonError, fetch_site
+
+    try:
+        for site in args.site:
+            fetch_site(site, args.out, args.token, months=args.months, max_plots=args.max_plots)
+    except NeonError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_neon_summary(args) -> int:
+    from .neon import summary
+
+    for d in sorted(Path(args.out).glob("*/stems.csv")):
+        print(d.parent.name, json.dumps(summary(d.parent)))
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="sky2trail", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -103,6 +123,19 @@ def main(argv=None) -> int:
 
     from .stage1.cli import add_parser as add_stage1
     add_stage1(sub)
+
+    pn = sub.add_parser("neon", help="download NEON stem maps and matching lidar")
+    ns = pn.add_subparsers(dest="neon_cmd", required=True)
+    nf = ns.add_parser("fetch", help="stems and lidar tiles for one or more sites")
+    nf.add_argument("--site", nargs="+", default=["SJER"], help="e.g. SJER SOAP TEAK")
+    nf.add_argument("--out", default="data/neon")
+    nf.add_argument("--token", default=None, help="NEON API token (default: $NEON_API_TOKEN)")
+    nf.add_argument("--months", nargs="+", default=None, help="survey months YYYY-MM (default: all)")
+    nf.add_argument("--max-plots", type=int, default=None, help="only the first N plots")
+    nf.set_defaults(func=_cmd_neon_fetch)
+    nm = ns.add_parser("summary", help="counts of plots, stems and tiles already downloaded")
+    nm.add_argument("--out", default="data/neon")
+    nm.set_defaults(func=_cmd_neon_summary)
 
     args = p.parse_args(argv)
     return args.func(args)
