@@ -16,3 +16,6 @@ runs/
 
 # Planning documents (description, proposal, plans) stay out of the repository.
 docs/
+
+# Claude Code context: local only.
+CLAUDE.md
