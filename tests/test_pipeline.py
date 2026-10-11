@@ -8,12 +8,12 @@ import json
 
 import numpy as np
 
-from trailgen.config import load_config
-from trailgen.evaluate import match_trunks
-from trailgen.grid import Grid, bin_stat
-from trailgen.io import write_nav2_map
-from trailgen.pipeline import process, save
-from trailgen.synthetic import make_scene
+from trailgen3d.config import load_config
+from trailgen3d.evaluate import match_trunks
+from trailgen3d.grid import Grid, bin_stat
+from trailgen3d.io import write_nav2_map
+from trailgen3d.pipeline import process, save
+from trailgen3d.synthetic import make_scene
 
 
 def _score(density, seed=0, max_dist=1.0):

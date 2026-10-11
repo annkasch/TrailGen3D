@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "trailgen"
+name = "trailgen3d"
 version = "0.1.0"
-description = "Navigation-ready simulation worlds of natural terrain from public aerial lidar"
+description = "Navigation-ready 3D simulation worlds of natural terrain from public aerial lidar"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -24,7 +24,7 @@ geo = [
 dev = ["pytest>=7"]
 
 [project.scripts]
-trailgen = "trailgen.cli:main"
+trailgen = "trailgen3d.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

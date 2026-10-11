@@ -70,7 +70,7 @@ def _crs_scales(crs) -> tuple[float, float]:
 
 
 def read_points(path: str | Path, units: str = "auto") -> PointCloud:
-    """Read a LAS/LAZ file (needs laspy) or a TrailGen .npz, returning meters.
+    """Read a LAS/LAZ file (needs laspy) or a TrailGen3D .npz, returning meters.
 
     units: 'auto' reads the unit from the file's CRS; 'm', 'us-ft' or 'ft' force it.
     """

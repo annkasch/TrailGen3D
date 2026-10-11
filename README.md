@@ -1,11 +1,15 @@
-# TrailGen
+# TrailGen3D
 
-Navigation-ready simulation worlds of natural California terrain, generated from public
+Navigation-ready 3D simulation worlds of natural terrain, generated from public
 aerial lidar (USGS 3DEP) and validated against ground truth from a Unitree Go2.
 
 This repository currently holds **Phase 1, the baseline world generator**: one lidar tile
 in, a ground model, tree list, low-vegetation map and traversability cost map out,
 including a map that Nav2 can load directly.
+
+**Names:** TrailGen3D is the software and overall project; **Sky2Trail** is the method
+(aerial lidar to navigable trail worlds); **Sky2Trail-CA** is the planned Go2 + 3DEP dataset
+of California trails. The Python package is `trailgen3d`, the command is `trailgen`.
 
 ## Quick start
 
@@ -81,7 +85,7 @@ benchmark comes from field ground truth (Phase 2 and Phase 5 of the build plan).
 ```
 configs/default.toml     all parameters (robot limits, thresholds, cost weights)
 scripts/fetch_3dep.py    download a 3DEP point cloud for a lon/lat box
-src/trailgen/
+src/trailgen3d/
   io.py                  LAS/LAZ reading (unit handling), GeoTIFF, Nav2 map, CSV
   grid.py                aligned north-up grids, binning, resampling
   terrain.py             ground model, height above ground, slope, roughness

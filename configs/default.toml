@@ -1,4 +1,4 @@
-# TrailGen default parameters.
+# TrailGen3D default parameters.
 # Distances in meters, angles in degrees. Override any value with --config my.toml.
 
 [grid]
