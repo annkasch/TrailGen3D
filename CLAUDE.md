@@ -53,7 +53,8 @@ sky2trail stage1 eval-synth --model runs/s1_synth/best.pt --out runs/s1_synth/ev
 ```
 
 ## Next steps
-1. Set up the 3080 PC (WSL2, conda, PyTorch with CUDA, Tailscale + SSH) and a private GitHub repo.
+1. Set up the 3080 PC (WSL2, conda, PyTorch with CUDA, Tailscale + SSH).
+   Public GitHub repo: https://github.com/annkasch/TrailGen3D. Conda env: `conda env create -f environment.yml`.
 2. Run the PyTorch smoke test, train stage 1 on synthetic data, compare with v0.
 3. Real training data: pair Sierra / NEON plots with 3DEP, align, extract stem labels,
    coverage masks; score v0 on real plots.
