@@ -31,7 +31,8 @@ def _eval_synth(args) -> int:
     from .predict import evaluate_synthetic, format_report
 
     report = evaluate_synthetic(args.model, load_config(args.config), args.out, n_scenes=args.scenes,
-                                densities=tuple(args.densities), size=args.size, device=args.device)
+                                densities=tuple(args.densities), size=args.size, device=args.device,
+                                tta=not args.no_tta)
     print(format_report(report))
     print(f"Details and previews in {args.out}/")
     return 0
@@ -43,7 +44,7 @@ def _run(args) -> int:
     from .predict import Stage1Model, run_stage1
 
     pc = read_points(args.input, units=args.units)
-    out = run_stage1(pc, load_config(args.config), Stage1Model(args.model, args.device))
+    out = run_stage1(pc, load_config(args.config), Stage1Model(args.model, args.device, tta=not args.no_tta))
     out.save(args.out, pc.crs_wkt)
     if not args.no_preview:
         from ..viz import save_preview
@@ -88,6 +89,7 @@ def add_parser(sub) -> None:
     e.add_argument("--size", type=float, default=100.0)
     e.add_argument("--device", default="auto")
     e.add_argument("--config", default=None)
+    e.add_argument("--no-tta", action="store_true", help="single view instead of 8 rotations/mirrors")
     e.set_defaults(func=_eval_synth)
 
     r = s.add_parser("run", help="aerial tile -> Sky2Trail output with learned stems")
@@ -98,4 +100,5 @@ def add_parser(sub) -> None:
     r.add_argument("--config", default=None)
     r.add_argument("--units", default="auto", choices=["auto", "m", "us-ft", "ft"])
     r.add_argument("--no-preview", action="store_true")
+    r.add_argument("--no-tta", action="store_true", help="single view instead of 8 rotations/mirrors")
     r.set_defaults(func=_run)

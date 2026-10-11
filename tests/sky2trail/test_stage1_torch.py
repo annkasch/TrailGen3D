@@ -88,6 +88,53 @@ def test_train_checkpoint_and_predict(tmp_path):
         assert s.xy_std > 0 and s.dbh_std > 0 and s.height_std > 0
 
 
+def test_tta_undo_matches_augmentation():
+    """Maps of a rotated/mirrored window, turned back by TTA, equal the maps of the original."""
+    if torch is None:
+        return
+    from sky2trail.stage1.augment import transform
+    from sky2trail.stage1.predict import _undo, _undo_offset
+    from sky2trail.stage1.targets import make_targets
+
+    rng = np.random.default_rng(0)
+    n = 40
+    stems = np.column_stack([rng.uniform(3, n - 3, (6, 2)), np.full(6, 0.3), np.full(6, 20.0)])
+    full = np.ones((n, n), bool)
+    ref = make_targets(stems, (n, n), full, True, CFG.stage1)
+    for k in range(4):
+        for flip in (False, True):
+            _, st, _ = transform(np.zeros((1, n, n)), stems, [full], k, flip)
+            t = make_targets(st, (n, n), full, True, CFG.stage1)
+            heat = _undo(torch.from_numpy(t["heat"])[None], k, flip)[0].numpy()
+            off = _undo_offset(torch.from_numpy(t["offset"])[None], k, flip)[0].numpy()
+            m = ref["reg_mask"] > 0
+            assert np.allclose(heat, ref["heat"], atol=1e-5), (k, flip)
+            assert np.allclose(off[:, m], ref["offset"][:, m], atol=1e-5), (k, flip)
+
+
+def test_tta_maps():
+    if torch is None:
+        return
+    from sky2trail.stage1.features import channel_names
+    from sky2trail.stage1.model import StemUNet
+    from sky2trail.stage1.predict import _undo, _undo_offset, forward_maps
+
+    c = len(channel_names(CFG.stage1))
+    torch.manual_seed(0)
+    net = StemUNet(c, base=8).eval()
+    x = torch.rand(2, c, 88, 88)
+    with torch.no_grad():
+        one = forward_maps(net, x, tta=False)
+        avg = forward_maps(net, x, tta=True)
+        # The 8-view average is exactly equivariant: a rotated window gives rotated maps.
+        rot = forward_maps(net, torch.rot90(x, 1, dims=(-2, -1)), tta=True)
+    for k in ("heat", "offset", "size"):
+        assert avg[k].shape == one[k].shape == (2, 2, 88, 88)
+    assert torch.allclose(_undo(rot["heat"], 1, False), avg["heat"], atol=1e-5)
+    assert torch.allclose(_undo(rot["size"], 1, False), avg["size"], atol=1e-5)
+    assert torch.allclose(_undo_offset(rot["offset"], 1, False), avg["offset"], atol=1e-5)
+
+
 def test_laplace_std_grows_off_training_data(tmp_path):
     """Model part of the variance: features far from the training features give a larger std."""
     if torch is None:

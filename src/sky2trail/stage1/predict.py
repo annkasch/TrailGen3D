@@ -25,8 +25,61 @@ from .train import _autocast, pick_device
 METHOD = "stage1-unet"
 
 
+def _undo(m: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
+    """Map a (B, C, H, W) output of a view (rotated k quarter turns, then mirrored) back."""
+    if flip:
+        m = m.flip(-1)
+    return torch.rot90(m, -k, dims=(-2, -1))
+
+
+def _undo_offset(o: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
+    """Like _undo, and also turn the (dv, du) vectors back: mirror undoes du, rotation (dv, du) -> (du, -dv)."""
+    o = _undo(o, k, flip)
+    dv, du = o[:, 0], o[:, 1]
+    if flip:
+        du = -du
+    for _ in range(k % 4):
+        dv, du = du, -dv
+    return torch.stack([dv, du], 1)
+
+
+def _undo_offset_std(s: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
+    """Per-axis std of the offset: a quarter turn swaps the axes, signs do not matter."""
+    s = _undo(s, k, flip)
+    return s.flip(1) if k % 2 else s
+
+
+def forward_maps(net, x: torch.Tensor, laplace: dict | None = None, tta: bool = True) -> dict:
+    """heat (probabilities), offset, size; with Laplace also offset_std and size_std.
+
+    tta: average over the 8 rotations and mirrors of the window. The std then combines the
+    Laplace variance of each view with the disagreement between views (law of total variance).
+    """
+    views = [(k, f) for k in range(4) for f in (False, True)] if tta else [(0, False)]
+    preds = {"heat": [], "offset": [], "size": []}
+    var = {"offset": [], "size": []}
+    for k, flip in views:
+        xt = torch.rot90(x, k, dims=(-2, -1))
+        if flip:
+            xt = xt.flip(-1)
+        out = net(xt, features=laplace is not None)
+        preds["heat"].append(_undo(torch.sigmoid(out["heat"].float()), k, flip))
+        preds["offset"].append(_undo_offset(out["offset"].float(), k, flip))
+        preds["size"].append(_undo(out["size"].float(), k, flip))
+        if laplace is not None:
+            std = std_maps(out, laplace)
+            var["offset"].append(_undo_offset_std(std["offset"], k, flip) ** 2)
+            var["size"].append(_undo(std["size"], k, flip) ** 2)
+    res = {key: torch.stack(v).mean(0) for key, v in preds.items()}
+    if laplace is not None:
+        for h in var:
+            spread = torch.stack(preds[h]).var(0, unbiased=False)
+            res[f"{h}_std"] = (torch.stack(var[h]).mean(0) + spread).sqrt()
+    return res
+
+
 class Stage1Model:
-    def __init__(self, checkpoint: str | Path, device: str = "auto"):
+    def __init__(self, checkpoint: str | Path, device: str = "auto", tta: bool = True):
         ck = torch.load(checkpoint, map_location="cpu", weights_only=False)
         self.cfg = Stage1Cfg(**ck["stage1"])
         self.threshold = float(ck.get("threshold", self.cfg.peak_threshold))
@@ -39,24 +92,20 @@ class Stage1Model:
         self.checkpoint = str(checkpoint)
         self.val = ck.get("val")
         self.laplace = ck.get("laplace")  # None for checkpoints trained before it existed
+        self.tta = tta
 
     @torch.no_grad()
     def maps(self, images: np.ndarray, batch: int = 32) -> dict:
-        """heat (probabilities), offset, size; with Laplace also offset_std and size_std."""
-        res = {"heat": [], "offset": [], "size": [], "offset_std": [], "size_std": []}
+        """Output maps as numpy arrays, see forward_maps."""
+        res = {}
         amp = self.device.type == "cuda"
         for i in range(0, len(images), batch):
             x = torch.from_numpy(images[i:i + batch].astype(np.float32)).to(self.device)
             with _autocast(self.device, amp):
-                out = self.net(x, features=self.laplace is not None)
-            res["heat"].append(torch.sigmoid(out["heat"].float()).cpu().numpy())
-            res["offset"].append(out["offset"].float().cpu().numpy())
-            res["size"].append(out["size"].float().cpu().numpy())
-            if self.laplace is not None:
-                std = std_maps(out, self.laplace)
-                res["offset_std"].append(std["offset"].cpu().numpy())
-                res["size_std"].append(std["size"].cpu().numpy())
-        return {k: np.concatenate(v) for k, v in res.items() if v}
+                out = forward_maps(self.net, x, self.laplace, self.tta)
+            for k, v in out.items():
+                res.setdefault(k, []).append(v.cpu().numpy())
+        return {k: np.concatenate(v) for k, v in res.items()}
 
 
 def predict_stems(pc: PointCloud, hag: np.ndarray, model: Stage1Model, cfg: Sky2TrailConfig) -> dict:
@@ -83,6 +132,7 @@ def run_stage1(pc: PointCloud, cfg: Sky2TrailConfig, model: Stage1Model) -> Sky2
         "stem_rule": "learned stem map (stage 1 U-Net)",
         "checkpoint": model.checkpoint, "threshold": model.threshold,
         "uncertainty": "last-layer Laplace" if model.laplace is not None else None,
+        "test_time_augmentation": model.tta,
         "small_stems": int(d["small"].sum()),
     })
 
@@ -110,12 +160,13 @@ def _pool(scores: list[dict], key: str) -> dict:
 
 
 def evaluate_synthetic(checkpoint: str, cfg: Sky2TrailConfig, out_dir: str, n_scenes: int = 5,
-                       densities=(2.0, 8.0), size: float = 100.0, device: str = "auto") -> dict:
+                       densities=(2.0, 8.0), size: float = 100.0, device: str = "auto",
+                       tta: bool = True) -> dict:
     """v0 and stage 1 on held-out hard scenes (seeds 2000+, never used for training)."""
     from ..synthetic import make_hard_scene
     from ..viz import save_preview
 
-    model = Stage1Model(checkpoint, device)
+    model = Stage1Model(checkpoint, device, tta=tta)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     report = {"checkpoint": checkpoint, "threshold": model.threshold, "scenes": n_scenes, "results": {}}
