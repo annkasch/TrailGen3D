@@ -106,6 +106,19 @@ def _cmd_wfsi_fetch(args) -> int:
     return 0
 
 
+def _cmd_wfsi_convert(args) -> int:
+    from .tls import ptx_to_npz
+
+    for src in map(Path, args.ptx):
+        dest = Path(args.out) / (src.stem + ".npz")
+        if not dest.exists():
+            s = ptx_to_npz(src, dest, voxel=args.voxel)
+            print(f"{src.name}: {len(s):,} points -> {dest}")
+        if args.delete_ptx:
+            src.unlink()
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="sky2trail", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -157,6 +170,12 @@ def main(argv=None) -> int:
     wf.add_argument("--flight", default="pre", choices=["pre", "post", "both"])
     wf.add_argument("--no-als", action="store_true", help="skip the ALS flightlines")
     wf.set_defaults(func=_cmd_wfsi_fetch)
+    wc = ws.add_parser("convert", help="TLS .ptx -> compact .npz (float32, optional voxel grid)")
+    wc.add_argument("ptx", nargs="+")
+    wc.add_argument("--out", required=True, help="output folder")
+    wc.add_argument("--voxel", type=float, default=0.01, help="m; 0 keeps every point")
+    wc.add_argument("--delete-ptx", action="store_true", help="remove each .ptx after converting")
+    wc.set_defaults(func=_cmd_wfsi_convert)
 
     args = p.parse_args(argv)
     return args.func(args)
