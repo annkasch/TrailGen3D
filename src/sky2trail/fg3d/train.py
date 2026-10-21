@@ -11,6 +11,7 @@ distance. Runs on CUDA (with mixed precision), Apple MPS or CPU.
 from __future__ import annotations
 
 import copy
+import functools
 import json
 import platform
 import subprocess
@@ -120,7 +121,8 @@ def _ddim(model, diff: Diffusion, als: torch.Tensor, shape, device, steps: int, 
 
 def train(data_dir: str, out_dir: str, cfg: TrainCfg | None = None, device: str = "auto",
           resume: bool = False, train_split: str = "train", val_split: str = "val",
-          log=print) -> dict:
+          log=None) -> dict:
+    log = log or functools.partial(print, flush=True)
     cfg = cfg or TrainCfg()
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -180,10 +182,13 @@ def train(data_dir: str, out_dir: str, cfg: TrainCfg | None = None, device: str 
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
             scaler.step(opt)
             scaler.update()
+            # EMA decay ramps up from 0, so early EMA weights follow the model (short runs work too)
+            gstep = epoch * steps_per_epoch + step
+            decay = min(cfg.ema, (1 + gstep) / (10 + gstep))
             with torch.no_grad():
                 for pe, pm in zip(ema.parameters(), model.parameters()):
-                    pe.lerp_(pm, 1 - cfg.ema)
-            run += float(loss)
+                    pe.lerp_(pm, 1 - decay)
+            run += float(loss.detach())
             n += 1
         rec = {"epoch": epoch, "seconds": round(time.time() - t0, 1), "lr": opt.param_groups[0]["lr"],
                "train_loss": round(run / max(n, 1), 5)}

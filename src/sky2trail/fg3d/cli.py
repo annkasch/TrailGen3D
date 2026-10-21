@@ -1,4 +1,4 @@
-"""`sky2trail fg3d synth-pairs | train | sample | eval`."""
+"""`sky2trail fg3d synth-pairs | register | train | sample | eval`."""
 
 from __future__ import annotations
 
@@ -40,6 +40,15 @@ def _sample(args) -> int:
     return 0
 
 
+def _register(args) -> int:
+    from ..register import register_plots
+
+    regs = register_plots(args.root, args.flight, args.plots or None)
+    print(f"{sum(r.ok for r in regs.values())}/{len(regs)} scans pass; "
+          f"check {args.root}/registration/{args.flight}/*.png")
+    return 0
+
+
 def _eval(args) -> int:
     from .sample import evaluate
 
@@ -57,6 +66,12 @@ def add_parser(sub) -> None:
     d.add_argument("--density", type=float, default=15.0, help="ALS pulses per m2")
     d.add_argument("--seed", type=int, default=0)
     d.set_defaults(func=_synth_pairs)
+
+    r = s.add_parser("register", help="register WFSI TLS scans to the ALS (heading + shift)")
+    r.add_argument("--root", required=True, help="a `sky2trail wfsi fetch` folder with tls_npz/")
+    r.add_argument("--flight", choices=["pre", "post"], default="pre")
+    r.add_argument("--plots", nargs="*", help="plot names (default: all converted scans)")
+    r.set_defaults(func=_register)
 
     t = s.add_parser("train", help="train the diffusion model on pairs (with split.json)")
     t.add_argument("--data", required=True)
