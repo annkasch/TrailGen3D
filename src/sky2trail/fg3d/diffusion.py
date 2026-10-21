@@ -51,16 +51,16 @@ class Diffusion:
 
     @torch.no_grad()
     def sample_ddpm(self, model: Denoiser, shape: tuple, cond=None, device="cpu",
-                    generator: torch.Generator | None = None) -> torch.Tensor:
-        """Ancestral sampling over all T steps (as in the paper)."""
-        x = torch.randn(shape, device=device, generator=generator)
+                    generator: torch.Generator | None = None, noise: torch.Tensor | None = None) -> torch.Tensor:
+        """Ancestral sampling over all T steps (as in the paper). `noise`: optional start x_T."""
+        x = _start(shape, device, generator, noise)
         for i in reversed(range(self.steps)):
             t = torch.full((shape[0],), i, device=device, dtype=torch.long)
             eps = model(x, t, cond)
             coef = self._at(self.betas / (1 - self.abar).sqrt(), t, x)
             mean = (x - coef * eps) / self._at(self.alphas.sqrt(), t, x)
             if i > 0:
-                z = torch.randn(shape, device=device, generator=generator)
+                z = _start(shape, device, generator, None)
                 x = mean + self._at(self.post_var.sqrt(), t, x) * z
             else:
                 x = mean
@@ -68,10 +68,11 @@ class Diffusion:
 
     @torch.no_grad()
     def sample_ddim(self, model: Denoiser, shape: tuple, cond=None, device="cpu", steps: int = 50,
-                    eta: float = 0.0, generator: torch.Generator | None = None) -> torch.Tensor:
+                    eta: float = 0.0, generator: torch.Generator | None = None,
+                    noise: torch.Tensor | None = None) -> torch.Tensor:
         """DDIM sampling on an evenly spaced subset of timesteps (fast evaluation)."""
         ts = torch.linspace(self.steps - 1, 0, steps).round().long().tolist()
-        x = torch.randn(shape, device=device, generator=generator)
+        x = _start(shape, device, generator, noise)
         for j, i in enumerate(ts):
             t = torch.full((shape[0],), i, device=device, dtype=torch.long)
             eps = model(x, t, cond)
@@ -84,8 +85,17 @@ class Diffusion:
             sigma = eta * ((1 - a_next) / (1 - a) * (1 - a / a_next)).clamp_min(0).sqrt()
             x = a_next.sqrt() * x0 + (1 - a_next - sigma ** 2).clamp_min(0).sqrt() * eps
             if eta > 0 and j + 1 < len(ts):
-                x = x + sigma * torch.randn(shape, device=device, generator=generator)
+                x = x + sigma * _start(shape, device, generator, None)
         return x
+
+
+def _start(shape, device, generator, noise):
+    """Initial x_T; random numbers drawn on the CPU when a CPU generator is given (any device)."""
+    if noise is not None:
+        return noise.to(device)
+    if generator is not None and generator.device.type == "cpu":
+        return torch.randn(shape, generator=generator).to(device)
+    return torch.randn(shape, device=device, generator=generator)
 
 
 def timestep_embedding(t: torch.Tensor, dim: int, max_period: float = 10000.0) -> torch.Tensor:
