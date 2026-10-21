@@ -1,4 +1,4 @@
-"""`sky2trail inspect | run | synth | stage1 | neon | wfsi`: aerial lidar in, ground-level data out."""
+"""`sky2trail inspect | run | synth | stage1 | fg3d | neon | wfsi`: aerial lidar in, ground-level data out."""
 
 from __future__ import annotations
 
@@ -148,6 +148,8 @@ def main(argv=None) -> int:
 
     from .stage1.cli import add_parser as add_stage1
     add_stage1(sub)
+    from .fg3d.cli import add_parser as add_fg3d
+    add_fg3d(sub)
 
     pn = sub.add_parser("neon", help="download NEON stem maps and matching lidar")
     ns = pn.add_subparsers(dest="neon_cmd", required=True)
