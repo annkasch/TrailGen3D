@@ -1,4 +1,4 @@
-"""`sky2trail fg3d synth-pairs | register | train | sample | eval`."""
+"""`sky2trail fg3d synth-pairs | register | pairs | train | sample | eval`."""
 
 from __future__ import annotations
 
@@ -49,6 +49,15 @@ def _register(args) -> int:
     return 0
 
 
+def _pairs(args) -> int:
+    from .build import BuildCfg, build_pairs
+
+    cfg = BuildCfg(max_dist=args.max_dist, min_height=args.min_height, n_tls=args.n_tls, seed=args.seed)
+    res = build_pairs(args.root, args.out, tuple(args.flights), cfg, only_ok=not args.all)
+    print(json.dumps(res))
+    return 0
+
+
 def _eval(args) -> int:
     from .sample import evaluate
 
@@ -72,6 +81,17 @@ def add_parser(sub) -> None:
     r.add_argument("--flight", choices=["pre", "post"], default="pre")
     r.add_argument("--plots", nargs="*", help="plot names (default: all converted scans)")
     r.set_defaults(func=_register)
+
+    b = s.add_parser("pairs", help="per-tree ALS/TLS pairs from registered scans (+ split.json)")
+    b.add_argument("--root", required=True, help="folder with tls_npz/, als_crops/, registration/")
+    b.add_argument("--out", required=True)
+    b.add_argument("--flights", nargs="+", default=["pre"], choices=["pre", "post"])
+    b.add_argument("--max-dist", type=float, default=20.0, help="treetop distance from the scanner, m")
+    b.add_argument("--min-height", type=float, default=5.0, help="skip lower trees, m")
+    b.add_argument("--n-tls", type=int, default=2048)
+    b.add_argument("--seed", type=int, default=0)
+    b.add_argument("--all", action="store_true", help="also use scans whose registration is flagged")
+    b.set_defaults(func=_pairs)
 
     t = s.add_parser("train", help="train the diffusion model on pairs (with split.json)")
     t.add_argument("--data", required=True)
