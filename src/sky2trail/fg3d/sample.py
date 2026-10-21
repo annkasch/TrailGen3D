@@ -16,7 +16,7 @@ from ..stage1.train import pick_device
 from .diffusion import Diffusion
 from .metrics import dbh, tree_height, tree_metrics
 from .pairs import OFFSET, PairDataset, load_pair, list_pairs, to_world
-from .train import build_model
+from .train import CLIP, build_model
 
 
 class Fg3dModel:
@@ -31,16 +31,16 @@ class Fg3dModel:
 
     @torch.no_grad()
     def generate(self, als: torch.Tensor, n_tls: int | None = None, sampler: str = "ddim",
-                 steps: int = 50, seed: int = 0) -> torch.Tensor:
+                 steps: int = 50, seed: int = 0, clip=CLIP) -> torch.Tensor:
         """TLS-like clouds (B, n_tls, 3) for normalised ALS points (B, n_als, 3)."""
         als = als.to(self.dev)
         shape = (als.shape[0], n_tls or self.n_tls, 3)
         g = torch.Generator().manual_seed(seed)
         cond = self.net.encode_cond(als)
         if sampler == "ddpm":
-            x = self.diff.sample_ddpm(self.net, shape, cond, self.dev, generator=g)
+            x = self.diff.sample_ddpm(self.net, shape, cond, self.dev, generator=g, clip=clip)
         else:
-            x = self.diff.sample_ddim(self.net, shape, cond, self.dev, steps=steps, generator=g)
+            x = self.diff.sample_ddim(self.net, shape, cond, self.dev, steps=steps, generator=g, clip=clip)
         return x.cpu()
 
 

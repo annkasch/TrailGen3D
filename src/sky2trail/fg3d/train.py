@@ -30,6 +30,9 @@ from .model import Fg3dNet, ModelCfg, count_parameters, tiny_cfg
 from .pairs import PairDataset, list_pairs
 
 
+CLIP = (-0.25, 1.25)        # predicted x_0 range while sampling: the unit tree box plus a margin
+
+
 @dataclass
 class TrainCfg:
     epochs: int = 100
@@ -116,7 +119,7 @@ def _ddim(model, diff: Diffusion, als: torch.Tensor, shape, device, steps: int, 
     g = torch.Generator().manual_seed(seed)
     noise = torch.randn(tuple(shape), generator=g).to(device)
     cond = model.encode_cond(als)
-    return diff.sample_ddim(model, tuple(shape), cond, device=device, steps=steps, noise=noise)
+    return diff.sample_ddim(model, tuple(shape), cond, device=device, steps=steps, noise=noise, clip=CLIP)
 
 
 def train(data_dir: str, out_dir: str, cfg: TrainCfg | None = None, device: str = "auto",

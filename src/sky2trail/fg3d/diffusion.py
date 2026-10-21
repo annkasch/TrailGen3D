@@ -51,14 +51,25 @@ class Diffusion:
 
     @torch.no_grad()
     def sample_ddpm(self, model: Denoiser, shape: tuple, cond=None, device="cpu",
-                    generator: torch.Generator | None = None, noise: torch.Tensor | None = None) -> torch.Tensor:
-        """Ancestral sampling over all T steps (as in the paper). `noise`: optional start x_T."""
+                    generator: torch.Generator | None = None, noise: torch.Tensor | None = None,
+                    clip: tuple[float, float] | None = None) -> torch.Tensor:
+        """Ancestral sampling over all T steps (as in the paper). `noise`: optional start x_T.
+
+        clip: clamp the predicted x_0 to this range at every step (data range plus a margin);
+        stops the few points with a poor early noise estimate from flying off.
+        """
         x = _start(shape, device, generator, noise)
+        c0 = self.abar_prev.sqrt() * self.betas / (1 - self.abar)
+        ct = self.alphas.sqrt() * (1 - self.abar_prev) / (1 - self.abar)
         for i in reversed(range(self.steps)):
             t = torch.full((shape[0],), i, device=device, dtype=torch.long)
             eps = model(x, t, cond)
-            coef = self._at(self.betas / (1 - self.abar).sqrt(), t, x)
-            mean = (x - coef * eps) / self._at(self.alphas.sqrt(), t, x)
+            if clip is None:
+                coef = self._at(self.betas / (1 - self.abar).sqrt(), t, x)
+                mean = (x - coef * eps) / self._at(self.alphas.sqrt(), t, x)
+            else:
+                x0 = self._x0_from_eps(x, t, eps).clamp(*clip)
+                mean = self._at(c0, t, x) * x0 + self._at(ct, t, x) * x
             if i > 0:
                 z = _start(shape, device, generator, None)
                 x = mean + self._at(self.post_var.sqrt(), t, x) * z
@@ -69,14 +80,17 @@ class Diffusion:
     @torch.no_grad()
     def sample_ddim(self, model: Denoiser, shape: tuple, cond=None, device="cpu", steps: int = 50,
                     eta: float = 0.0, generator: torch.Generator | None = None,
-                    noise: torch.Tensor | None = None) -> torch.Tensor:
-        """DDIM sampling on an evenly spaced subset of timesteps (fast evaluation)."""
+                    noise: torch.Tensor | None = None, clip: tuple[float, float] | None = None) -> torch.Tensor:
+        """DDIM sampling on an evenly spaced subset of timesteps (fast evaluation). clip: as for DDPM."""
         ts = torch.linspace(self.steps - 1, 0, steps).round().long().tolist()
         x = _start(shape, device, generator, noise)
         for j, i in enumerate(ts):
             t = torch.full((shape[0],), i, device=device, dtype=torch.long)
             eps = model(x, t, cond)
             x0 = self._x0_from_eps(x, t, eps)
+            if clip is not None:
+                x0 = x0.clamp(*clip)
+                eps = (x - self._at(self.abar.sqrt(), t, x) * x0) / self._at((1 - self.abar).sqrt(), t, x)
             a = self._at(self.abar, t, x)
             if j + 1 < len(ts):
                 a_next = self._at(self.abar, torch.full_like(t, ts[j + 1]), x)
