@@ -1,4 +1,4 @@
-"""`sky2trail inspect | run | synth | stage1 | neon`: aerial lidar in, ground-level data out."""
+"""`sky2trail inspect | run | synth | stage1 | neon | wfsi`: aerial lidar in, ground-level data out."""
 
 from __future__ import annotations
 
@@ -94,6 +94,18 @@ def _cmd_neon_summary(args) -> int:
     return 0
 
 
+def _cmd_wfsi_fetch(args) -> int:
+    from .wfsi import WfsiError, fetch
+
+    flights = ("pre", "post") if args.flight == "both" else (args.flight,)
+    try:
+        fetch(args.out, None if args.tls == "all" else int(args.tls), flights, als=not args.no_als)
+    except WfsiError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="sky2trail", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -136,6 +148,15 @@ def main(argv=None) -> int:
     nm = ns.add_parser("summary", help="counts of plots, stems and tiles already downloaded")
     nm.add_argument("--out", default="data/neon")
     nm.set_defaults(func=_cmd_neon_summary)
+
+    pw = sub.add_parser("wfsi", help="download Fort Stewart 2022 paired ALS + TLS (ForestGen3D data)")
+    ws = pw.add_subparsers(dest="wfsi_cmd", required=True)
+    wf = ws.add_parser("fetch", help="plot table, TLS scans of a plot sample, ALS flightlines")
+    wf.add_argument("--out", default="data/fort_stewart")
+    wf.add_argument("--tls", default="12", help="number of plots to fetch scans for, or 'all'")
+    wf.add_argument("--flight", default="pre", choices=["pre", "post", "both"])
+    wf.add_argument("--no-als", action="store_true", help="skip the ALS flightlines")
+    wf.set_defaults(func=_cmd_wfsi_fetch)
 
     args = p.parse_args(argv)
     return args.func(args)

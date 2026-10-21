@@ -1,0 +1,191 @@
+"""WFSI Fort Stewart 2022: paired airborne (ALS) and terrestrial (TLS) lidar, the data ForestGen3D used.
+
+Downloads from the DoD Wildland Fire Science Initiative data portal (portal.wfsi-data.org, a
+DataONE / Metacat node; CC BY 4.0) into a local folder:
+
+    sky2trail wfsi fetch --out data/fort_stewart --tls 12            # sample for development
+    sky2trail wfsi fetch --out data/fort_stewart --tls all --flight both   # everything (~123 GB)
+
+Datasets:
+  doi:10.60594/W4D59M  Leica BLK360 G1 TLS, 240 single scans (.ptx, ~0.45 GB each): 120 macroplots,
+                       one centre scan each, pre-burn (Feb 2022, "0222") and post-burn (Mar 2022, "0322").
+                       File name FTST<X><###><MMYY>.ptx, X = E (burn unit edge) / F (flatwood) / W (wetland).
+                       Each scan is in the scanner's own frame (identity transform, no compass heading).
+  doi:10.60594/W42P4S  ALS, Optech Galaxy T2000, ~15 pts/m^2, UTM 17N (NAD83 2011), NAVD88, one LAZ per
+                       flightline: 4020x = 23 Nov 2021 (pre-burn), 4040x = 13 Mar 2022 (post-burn).
+                       Flightlines are diagonal strips, so every line of a flight is fetched.
+  doi:10.60594/W4730Z  macroplot locations (GPS, UTM 17N), which plots were scanned / tree-surveyed.
+  doi:10.60594/W4MS3D  tree and sapling observations.
+
+Every file is checked against the portal's MD5 checksum; manifest.json lists what was fetched.
+"""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+NODE = "https://portal.wfsi-data.org/catalog/d1/mn/v2"
+TLS = "doi:10.60594/W4D59M"
+ALS = "doi:10.60594/W42P4S"
+PLOTS = "doi:10.60594/W4730Z"
+TREES = "doi:10.60594/W4MS3D"
+USER_AGENT = "trailgen3d-wfsi-loader"
+# ALS flightline name prefix -> flight
+FLIGHTS = {"pre": "4020", "post": "4040"}
+# TLS month code -> flight it pairs with
+SCAN_MONTH = {"pre": "0222", "post": "0322"}
+
+
+class WfsiError(RuntimeError):
+    pass
+
+
+def _get(url: str, retries: int = 3, timeout: int = 120) -> bytes:
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(2 * (attempt + 1))
+    raise WfsiError(f"giving up on {url}")
+
+
+def solr(query: str, fields: str = "id,fileName,size,checksum,checksumAlgorithm,formatType",
+         rows: int = 5000) -> list[dict]:
+    q = urllib.parse.urlencode({"q": query, "fl": fields, "rows": rows, "wt": "json"})
+    return json.loads(_get(f"{NODE}/query/solr/?{q}"))["response"]["docs"]
+
+
+def list_files(doi: str) -> list[dict]:
+    """Current files of a dataset package (id, fileName, size, checksum), sorted by name."""
+    meta = solr(f'id:"{doi}"', fields="resourceMap")
+    if not meta or not meta[0].get("resourceMap"):
+        raise WfsiError(f"{doi}: not found on {NODE}")
+    docs = solr(f'resourceMap:"{meta[0]["resourceMap"][0]}"')
+    return sorted((d for d in docs if d.get("fileName")), key=lambda d: d["fileName"])
+
+
+def download(f: dict, dest: Path, log=print) -> Path:
+    """Stream one file to disk unless already there with the right size; verify MD5."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    size = int(f.get("size") or 0)
+    if dest.exists() and (not size or dest.stat().st_size == size):
+        return dest
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    md5 = hashlib.md5()
+    req = urllib.request.Request(f"{NODE}/object/{urllib.parse.quote(f['id'], safe='')}",
+                                 headers={"User-Agent": USER_AGENT})
+    t0 = time.time()
+    with urllib.request.urlopen(req, timeout=300) as r, open(tmp, "wb") as out:
+        while chunk := r.read(1 << 22):
+            out.write(chunk)
+            md5.update(chunk)
+    if size and tmp.stat().st_size != size:
+        raise WfsiError(f"{dest.name}: got {tmp.stat().st_size} bytes, expected {size}")
+    if f.get("checksumAlgorithm", "").upper() == "MD5" and md5.hexdigest() != f.get("checksum"):
+        raise WfsiError(f"{dest.name}: MD5 mismatch")
+    tmp.rename(dest)
+    log(f"  {dest.name}: {size / 1e9:.2f} GB in {time.time() - t0:.0f} s")
+    return dest
+
+
+@dataclass
+class Plot:
+    name: str          # e.g. F041
+    burn_unit: str     # E, F6.3, F6.4
+    forest_type: str   # edge, flatwoods, wetlands
+    x: float           # UTM 17N easting, m (GPS, a few m accuracy)
+    y: float
+    tree_survey: bool
+
+
+def read_plots(path: Path) -> list[Plot]:
+    out = []
+    with open(path, encoding="utf-8-sig") as fh:
+        for r in csv.DictReader(fh):
+            try:
+                x, y = float(r["Easting"]), float(r["Northing"])
+            except ValueError:
+                continue
+            out.append(Plot(r["Macroplot"], r["BurnUnit"], r["Forest_type"], x, y,
+                            r.get("Tree_survey", "").strip().lower() == "yes"))
+    return out
+
+
+def scan_name(plot: str, flight: str) -> str:
+    return f"FTST{plot}{SCAN_MONTH[flight]}.ptx"
+
+
+def pick_sample(plots: list[Plot], n: int) -> list[Plot]:
+    """n plots spread over burn units and forest types, tree-surveyed plots first."""
+    groups: dict[tuple, list[Plot]] = {}
+    for p in sorted(plots, key=lambda p: (not p.tree_survey, p.name)):
+        groups.setdefault((p.burn_unit, p.forest_type), []).append(p)
+    keys = sorted(groups)
+    out: list[Plot] = []
+    while len(out) < min(n, len(plots)):
+        for k in keys:
+            if groups[k] and len(out) < n:
+                out.append(groups[k].pop(0))
+    return sorted(out, key=lambda p: p.name)
+
+
+def fetch(out: str | Path, n_tls: int | None = 12, flights: tuple[str, ...] = ("pre",),
+          als: bool = True, log=print) -> dict:
+    """Metadata, plot table, tree observations, TLS scans of a plot sample, and ALS flightlines.
+
+    Layout: OUT/meta/..., OUT/tls/<flight>/*.ptx, OUT/als/<flight>/*.laz, OUT/manifest.json.
+    n_tls: number of plots whose scans to fetch (None = all 120).
+    """
+    out = Path(out)
+    manifest: dict = {"node": NODE, "datasets": {}, "plots": [], "files": {}}
+
+    def small(doi: str, sub: str):
+        files = list_files(doi)
+        manifest["datasets"][doi] = len(files)
+        for f in files:
+            if not f["fileName"].endswith((".ptx", ".laz")) and int(f.get("size") or 0) < 50_000_000:
+                download(f, out / "meta" / sub / f["fileName"], log=lambda *_: None)
+        return files
+
+    log("metadata, plot locations, tree observations")
+    tls_files = {f["fileName"]: f for f in small(TLS, "tls")}
+    als_files = small(ALS, "als")
+    small(PLOTS, "plots")
+    small(TREES, "trees")
+
+    plot_csv = next((out / "meta" / "plots").glob("Geographical_Macroplot_Data_*2022.csv"))
+    plots = read_plots(plot_csv)
+    chosen = plots if n_tls is None else pick_sample(plots, n_tls)
+    manifest["plots"] = [p.__dict__ for p in chosen]
+
+    for fl in flights:
+        names = [scan_name(p.name, fl) for p in chosen]
+        missing = [n for n in names if n not in tls_files]
+        if missing:
+            log(f"no TLS scan for: {', '.join(missing)}")
+        todo = [tls_files[n] for n in names if n in tls_files]
+        log(f"TLS {fl}-burn: {len(todo)} scans, {sum(int(f['size']) for f in todo) / 1e9:.1f} GB")
+        for f in todo:
+            download(f, out / "tls" / fl / f["fileName"], log)
+            manifest["files"][f"tls/{fl}/{f['fileName']}"] = {"size": f["size"], "md5": f.get("checksum")}
+        if als:
+            lines = [f for f in als_files if f["fileName"].startswith(FLIGHTS[fl]) and f["fileName"].endswith(".laz")]
+            log(f"ALS {fl}-burn: {len(lines)} flightlines, {sum(int(f['size']) for f in lines) / 1e9:.1f} GB")
+            for f in lines:
+                download(f, out / "als" / fl / f["fileName"], log)
+                manifest["files"][f"als/{fl}/{f['fileName']}"] = {"size": f["size"], "md5": f.get("checksum")}
+
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    return manifest
