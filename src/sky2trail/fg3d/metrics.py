@@ -74,7 +74,8 @@ def dbh(points: np.ndarray, ground: float = 0.0, lo: float = 1.2, hi: float = 1.
 
     centre: approximate stem position; points farther than `search` from it are ignored
     (default: median of the slice). RANSAC with inlier tolerance `tol` (m) ignores branches and
-    understory in the slice. Returns nan with too few points.
+    understory in the slice. Returns nan with too few points or no plausible circle (radius
+    beyond `search`, e.g. a near-straight line of diffuse points).
     """
     z = points[:, 2] - ground
     s = points[(z >= lo) & (z <= hi), :2]
@@ -85,7 +86,7 @@ def dbh(points: np.ndarray, ground: float = 0.0, lo: float = 1.2, hi: float = 1.
     if len(s) < min_points:
         return float("nan")
     cx, cy, r = ransac_circle(s, tol)
-    return 2 * r
+    return 2 * r if np.isfinite(r) and r <= search else float("nan")
 
 
 def tree_height(points: np.ndarray, ground: float = 0.0, q: float = 99.5) -> float:
